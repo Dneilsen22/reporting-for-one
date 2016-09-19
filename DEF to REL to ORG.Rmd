@@ -1,0 +1,522 @@
+---
+title: "V2 Status History Report"
+author: "Dan Neilsen"
+date: "September 13, 2016"
+output:
+  html_document:
+    toc: true
+    theme: united
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width:320px) { /* smartphones, portrait iPhone, portrait 480x320 phones (Android) */ }
+@media (min-width:480px) { /* smartphones, Android phones, landscape iPhone */ }
+@media (min-width:600px) { /* portrait tablets, portrait iPad, e-readers (Nook/Kindle), landscape 800x480 phones (Android) */ }
+@media (min-width:801px) { /* tablet, landscape iPad, lo-res laptops ands desktops */ }
+@media (min-width:1025px) { /* big landscape tablets, laptops, and desktops */ }
+@media (min-width:1281px) { /* hi-res laptops and desktops */ }
+    
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:50%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 38px;
+}
+h3 {
+  font-size: 24px;
+  font-weight: bold;
+  border-bottom:1px solid #CCC;
+}
+h4 {
+  font-size: 18px;
+  font-weight: bold;
+  color:2F5642;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("~/RScripts")
+
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(readxl)
+library(plotly)
+library(DT)
+library(dygraphs)
+library(data.table)
+library(RColorBrewer)
+library(knitr)
+library(lattice)
+library(lubridate)
+
+fulldata <- read_excel("TMS - Load Tender Details_Current.xlsx")
+
+colnames(fulldata)[2] <- "Responsible"
+
+PlantOrder <- factor(c("GENEVA","RICHBURG","DEWITT","KINGSBURG","CORSICANA","CARLETON","OVERALL"))
+factor(PlantOrder, levels = c("GENEVA","RICHBURG","DEWITT","KINGSBURG","CORSICANA","CARLETON","OVERALL"))
+factor(PlantOrder, labels = c("GENEVA","RICHBURG","DEWITT","KINGSBURG","CORSICANA","CARLETON","OVERALL"))
+
+MonthNamevalue <- factor(c(
+"January","February","March","April","May","June","July","August","September","October","November","December"))
+factor(MonthNamevalue, levels = c(
+"January","February","March","April","May","June","July","August","September","October","November","December"))
+factor(MonthNamevalue, labels = c(
+"January","February","March","April","May","June","July","August","September","October","November","December"))
+
+ fulldata$Month.Def <- months(as.Date(fulldata$Created.Date.and.Time))
+ fulldata$Month.Rel <- months(as.Date(fulldata$Tender.Date.and.Time))
+ fulldata$Month.Org <- months(as.Date(fulldata$Response.Date))
+ fulldata$Month.Pick.Up.From <- months(as.Date(fulldata$Scheduled.Pick.Up.From))
+ fulldata$Month.Pick.Up.To <- months(as.Date(fulldata$Scheduled.Pickup.To.Date))
+
+```
+
+## Report Definitions
+
+This is a summary for the status window times based on V2 Statuses.
+
+DEF: Created shipment and load
+
+REL: Released for load planning and Tendered to carrier
+
+ORG: Tender Accepted by carrier
+
+START FROM: Planned loading start time
+
+START TO: Required departure time to meet legal transit
+
+Please make note that numbers reflect window timing between V2 statuses.
+
+### Findings
+
+####Richburg Summary
+Richburg carriers have a faster response time for both tender acceptance and tender rejection.In viewing the DEF and REL statuses, Richburg has, on average, smaller DEF/creation to START TO/departure windows. Those smaller windows are exacerbated by a lowest monthly average(4 months) of 19.66 hours for a V2 status switch from DEF to REL.
+
+Smaller timing windows, while they encourage faster acceptance/rejection, could potentially require more communication to keep shipments planned/organized. Currently, Richburg has highest number of filed plant related emails in Guardian.Loadmngt@penske.com since 08/22/2016(3 weeks of emails). The count is at 705 total emails with 57 unique chains referencing late or hot loads.
+
+####Geneva Summary
+Geneva has larger DEF to START TO windows, leading to scheduling loads much farther out, beneficial for special equipment lanes.
+
+####Corsicana, Dewitt and Kingsburg Summary
+On average, timing data is not extensive. 
+
+### DEF V2 Status Summary
+
+#### DEF to REL Status History 
+(April through August)
+
+```{r DeftoRel, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+DeftoRelbyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise(Mean.DEF.to.REL=mean(DEF.to.REL)) %>%
+	mutate(Hours.DEF.to.REL=(Mean.DEF.to.REL/60))
+	
+DeftoRelbyplantweek$Month.Def <- factor(DeftoRelbyplantweek$Month.Def,levels=MonthNamevalue)
+
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(DeftoRelbyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+DeftoRelplot <- ggplot(DeftoRelbyplantweek,aes(Month.Def,Hours.DEF.to.REL,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,100) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(DeftoRelplot)
+cat("</td>")
+cat("<td>")
+DeftoRelTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(DEF.to.REL)/60),
+			  "Min Hours"=(min(DEF.to.REL)/60),
+			  "Max Hours"=(max(DEF.to.REL)/60)
+			  )
+
+DeftoRelbyplantweek$Month.Def <- factor(DeftoRelbyplantweek$Month.Def,levels=MonthNamevalue)
+			  
+datatable(DeftoRelTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+#### DEF to Start From Status History 
+(April through August 2016)
+
+```{r DeftoStartFrom, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+DeftoStartFrombyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise(DEF.to.START.FROM=mean(DEF.to.START.FROM)) %>%
+	mutate(Hours=(DEF.to.START.FROM/60))
+
+DeftoStartFrombyplantweek$Month.Def <- factor(DeftoStartFrombyplantweek$Month.Def,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(DeftoStartFrombyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+DeftoStartFrombyplantweek <- ggplot(DeftoStartFrombyplantweek,aes(Month.Def,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(DeftoStartFrombyplantweek)
+cat("</td>")
+cat("<td>")
+DeftoStartFromTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(DEF.to.START.FROM)/60),
+			  "Min Hours"=(min(DEF.to.START.FROM)/60),
+			  "Max Hours"=(max(DEF.to.START.FROM)/60)
+			  )
+			  
+datatable(DeftoStartFromTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+#### DEF to Start To Status History 
+(April through August 2016)
+
+```{r DeftoStartTo, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+DeftoStartTobyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise(DEF.to.START.TO=mean(DEF.to.START.TO)) %>%
+	mutate(Hours=(DEF.to.START.TO/60))
+
+DeftoStartTobyplantweek$Month.Def <- factor(DeftoStartTobyplantweek$Month.Def,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(DeftoStartTobyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+DeftoStartTobyplantweek <- ggplot(DeftoStartTobyplantweek,aes(Month.Def,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(DeftoStartTobyplantweek)
+cat("</td>")
+cat("<td>")
+DeftoStartToTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Def>15 & Week.Num.Def<36) %>%
+    group_by(Responsible,Month.Def) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(DEF.to.START.TO)/60),
+			  "Min Hours"=(min(DEF.to.START.TO)/60),
+			  "Max Hours"=(max(DEF.to.START.TO)/60)
+			  )
+			  
+datatable(DeftoStartToTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+### REL V2 Status Summary
+
+#### REL to ORG Status History 
+(April through August 2016)
+
+REL to ORG is based on tender offer time to tender accept time by the carrier. 
+
+```{r RELtoORG, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+RELtoORGbyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise(REL.to.ORG=mean(REL.to.ORG)) %>%
+	mutate(Hours=(REL.to.ORG/60))
+
+RELtoORGbyplantweek$Month.Rel <- factor(RELtoORGbyplantweek$Month.Rel,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(RELtoORGbyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+RELtoORGbyplantweek <- ggplot(RELtoORGbyplantweek,aes(Month.Rel,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,15) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(RELtoORGbyplantweek)
+cat("</td>")
+cat("<td>")
+RELtoORGTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(REL.to.ORG)/60),
+			  "Min Hours"=(min(REL.to.ORG)/60),
+			  "Max Hours"=(max(REL.to.ORG)/60)
+			  )
+			  
+datatable(RELtoORGTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+#### REL to REJECTED Status History 
+(April through August 2016)
+
+REL to ORG-REJECTED is based on tender offer time to tender reject time by the carrier.
+
+```{r RELtoRejected, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+RELtoORGbyplantweek <- fulldata %>%
+    filter(Tender.Response=="Rejected" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise(REL.to.ORG=mean(REL.to.ORG)) %>%
+	mutate(Hours=(REL.to.ORG/60))
+	
+RELtoORGbyplantweek$Month.Rel <- factor(RELtoORGbyplantweek$Month.Rel,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(RELtoORGbyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+RELtoORGbyplantweek <- ggplot(RELtoORGbyplantweek,aes(Month.Rel,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(RELtoORGbyplantweek)
+cat("</td>")
+cat("<td>")
+RELtoORGTable <- fulldata %>%
+    filter(Tender.Response=="Rejected" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(REL.to.ORG)/60),
+			  "Min Hours"=(min(REL.to.ORG)/60),
+			  "Max Hours"=(max(REL.to.ORG)/60)
+			  )
+			  
+datatable(RELtoORGTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+#### REL to START FROM Status History 
+(April through August 2016)
+
+```{r RELtoStartFrom, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+RELtoStartFrombyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise(REL.to.START.FROM=mean(REL.to.START.FROM)) %>%
+	mutate(Hours=(REL.to.START.FROM/60))
+
+RELtoStartFrombyplantweek$Month.Rel <- factor(RELtoStartFrombyplantweek$Month.Rel,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(RELtoStartFrombyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+RELtoStartFrombyplantweek <- ggplot(RELtoStartFrombyplantweek,aes(Month.Rel,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(RELtoStartFrombyplantweek)
+cat("</td>")
+cat("<td>")
+RELtoStartFromTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(REL.to.START.FROM)/60),
+			  "Min Hours"=(min(REL.to.START.FROM)/60),
+			  "Max Hours"=(max(REL.to.START.FROM)/60)
+			  )
+			  
+datatable(RELtoStartFromTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+#### REL to START TO Status History 
+(April through August 2016)
+
+```{r ReltoStartTo, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+ReltoStartTobyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise(REL.to.START.TO=mean(REL.to.START.TO)) %>%
+	mutate(Hours=(REL.to.START.TO/60))
+
+ReltoStartTobyplantweek$Month.Rel <- factor(ReltoStartTobyplantweek$Month.Rel,levels=MonthNamevalue)
+	
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(ReltoStartTobyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+ReltoStartTobyplantweek <- ggplot(ReltoStartTobyplantweek,aes(Month.Rel,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(ReltoStartTobyplantweek)
+cat("</td>")
+cat("<td>")
+ReltoStartToTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Rel>15 & Week.Num.Rel<36) %>%
+    group_by(Responsible,Month.Rel) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(REL.to.START.TO)/60),
+			  "Min Hours"=(min(REL.to.START.TO)/60),
+			  "Max Hours"=(max(REL.to.START.TO)/60)
+			  )
+			  
+datatable(ReltoStartToTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+
+### ORG V2 Status Summary
+
+#### ORG to START TO Status History 
+(April through August 2016)
+
+Richburg data suggests the facility has the lowest average(excluding Corsicana) window of about 3 1/2 days lead time to shipment departure from tender acceptance.
+
+```{r ORGtoStartTo, echo=FALSE,message=FALSE, results='asis',warning=FALSE, out.extra=''}
+cat("<table class='container'><tr>")
+cat("<td>")
+ORGtoStartTobyplantweek <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Org>15 & Week.Num.Org<36) %>%
+    group_by(Responsible,Month.Org) %>%
+    summarise(ORG.to.START.TO=mean(ORG.to.START.TO)) %>%
+	mutate(Hours=(ORG.to.START.TO/60))
+
+myColors <- brewer.pal(5,"Set1")
+names(myColors) <- levels(ORGtoStartTobyplantweek$Responsible)
+colScale <- scale_colour_manual(name = "Responsible",values = myColors)
+
+ORGtoStartTobyplantweek$Month.Org <- factor(ORGtoStartTobyplantweek$Month.Org,levels=MonthNamevalue)
+
+ORGtoStartTobyplantweek <- ggplot(ORGtoStartTobyplantweek,aes(Month.Org,Hours,group = Responsible)) +
+  geom_point(stat='summary', fun.y=sum,aes(color=Responsible)) +
+  stat_summary(fun.y=sum, geom="line",aes(color=Responsible)) +
+	colScale +
+  ylim(0,500) +
+    labs(x="Week Number",y="Number of Hours") +
+  theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+	
+ggplotly(ORGtoStartTobyplantweek)
+cat("</td>")
+cat("<td>")
+ORGtoStartToTable <- fulldata %>%
+    filter(Tender.Response=="Accepted" & Week.Num.Org>15 & Week.Num.Org<36) %>%
+    group_by(Responsible,Month.Org) %>%
+    summarise('# of Transactions' = n(),
+              "Average Hours"=(mean(ORG.to.START.TO)/60),
+			  "Min Hours"=(min(ORG.to.START.TO)/60),
+			  "Max Hours"=(max(ORG.to.START.TO)/60)
+			  )
+			  
+datatable(ORGtoStartToTable,rownames = FALSE, filter = 'none',colnames = c('Plant' = 1,'Month' = 2, '# of Loads' = 3)) %>%
+  formatRound(c("Average Hours","Min Hours","Max Hours"), 2)
+cat("</td>")
+cat("</tr></table>")
+```
+

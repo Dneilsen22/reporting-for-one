@@ -1,0 +1,492 @@
+---
+title: "Weekly Metric Overview"
+author: "Dan Neilsen"
+date: "August 16, 2016"
+output:
+  html_document:
+    fig_height: 4.8
+    fig_width: 7
+  pdf_document: default
+  word_document: default
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.plotly html-widget {
+  float:left;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("~/RScripts")
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(readxl)
+library(chron)
+library(timeDate)
+library(grid)
+library(gtable)
+library(plotly)
+library(lubridate)
+library(DT)
+library(RColorBrewer)
+
+metricsmonth <- read_excel("GUAR_Monthly Metric.xlsx")
+
+tmstenderdetails <- read_excel("TMS - Delivery Details.xlsx")
+
+utilizationdetails <- read_excel("Utilization_Report_V1.2.xlsx")
+
+metrics = merge(metricsmonth,tmstenderdetails,by="Load.ID")
+
+colnames(metrics)[5] <- "SCAC"
+
+#Start Here
+Startweekvalue <- "2016-08-08"
+Endweekvalue <- "2016-07-11"
+
+dayvalue <- factor(c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
+factor(dayvalue, levels = c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
+factor(dayvalue, labels =c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
+
+carriercontrolledvalue <- factor(c("Carrier Controlled","Not CC"))
+factor(carriercontrolledvalue, levels = c("Carrier Controlled","Not CC"))
+factor(carriercontrolledvalue, labels =c("Carrier Controlled","Not CC"))
+
+#Create a weekday column
+metrics$Weekday <- weekdays(metrics$Calculated.Start.Date)
+
+#Create a week column
+metrics$Week <- as.Date(cut(metrics$Calculated.Start.Date,
+    breaks = "week",
+    start.on.monday = TRUE))
+
+#Create a month column
+metrics$Month <- as.Date(cut(metrics$Calculated.Start.Date,
+    breaks = "month"))
+
+#Create a Weight by Tons(US tons)
+metrics <- metrics %>%
+    mutate(Load.Weight.Tons=Load.Weight/2000) %>%
+	mutate(CPT=Load.Total.Cost/Load.Weight.Tons)
+
+	#Multiplies the # of miles by 2, due to being dedicated
+metrics <- metrics %>%
+    mutate(roundtripmiles=YTD.Shipment.Distance * 2)
+	
+x <- metrics
+
+xGen <- x %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-GEN")
+
+xDew <- x %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-DEW")
+	
+xRich <- x %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-RICH")
+
+xKing <- x %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-KING")
+
+lateloads <- x %>%
+     distinct(Load.ID, .keep_all=TRUE) %>%
+     filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+     filter(Carrier.Late.Arrival=="Late") %>%
+     group_by(Week,Carrier.Control) %>%
+     summarize(count = n() ) %>%
+	   arrange(Week,Carrier.Control)
+
+#This will sort the CC and Not CC in the end chart
+#%>%
+	 #mutate(Carrier.Control = factor(carriercontrolledvalue, levels = c("Carrier Controlled","Not CC")))
+
+metricsutil = merge(metrics,utilizationdetails,by="Load.ID")
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents.
+
+```{r loadmedianaverages}
+summary(metrics$Load.Pieces)
+```
+
+## Overall Charting
+
+Overall Total Loads Shipped by Weekday
+
+```{r overallrelease, echo=FALSE,message=FALSE,warning=FALSE}
+#Script to run ggplot for total load release per day
+release <- x %>%
+    distinct(Load.ID,.keep_all = TRUE) %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,Weekday) %>%
+	summarize( count = n() )
+
+release$Weekday <- factor(release$Weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+releaseplot <- release %>%
+ggplot(aes(x=Weekday,y=count)) + 
+    geom_bar(aes(fill = Weekday,alpha = factor(Week)), stat = "identity") + 
+    scale_alpha_manual(values = c(0.7,1,0.7,1, 0.7),guide = "none",expand = c(0.1,0.1)) +
+    facet_wrap(~Week,nrow=1) +
+    theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        legend.position = "none",
+                        axis.title.x=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.ticks.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+						strip.text=element_text(vjust=-10),
+						axis.title.y=element_text(hjust=-5))+
+    labs(x="Weekdays",y="") +
+    ylim(0,200)
+
+ggplotly(releaseplot)
+```
+
+CPT during the Past 5 Weeks
+
+```{r overallcpt, echo=FALSE,message=FALSE,warning=FALSE}
+#Script to run ggplot for CPT	
+cptover <- x %>%
+    distinct(Load.ID,SCAC,Complete.Op.Responsible.ID,Week,Month,Weekday,Load.Weight.Tons,Load.Total.Cost,CPT)  %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,SCAC) %>%
+	summarize(CPT=mean(CPT)) 
+	
+stat_sum_single <- function(fun, geom="point", ...) {
+  stat_summary(fun.y=fun, color="red", geom=geom, size = 1, ...)
+}
+
+cptoverplot <- ggplot(data=cptover,aes(Week, CPT, color=SCAC)) +
+    geom_jitter() +
+	ylim(0,500) +
+    coord_cartesian(ylim = c(0, 500)) +
+    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+                        axis.title.y=element_text(angle=180)) +
+	stat_sum_single(mean, geom="line")
+
+ggplotly(cptoverplot)
+```
+
+Dedicated Utilization
+
+```{r overallutilization, echo=FALSE}
+#overall utilization or multiple plants achieved by (totalrequiredmiles=mean(Required.Miles)) also change Required.Miles to numbers in spreasheet
+utilover <- metricsutil %>%
+    distinct(Load.ID,.keep_all = TRUE)  %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(SCAC,Week) %>%
+	summarise(totalmiles= sum(Miles),totalrequiredmiles=mean(Required.Miles)) %>%
+	mutate(utilization=totalmiles/totalrequiredmiles) %>%
+    mutate(utilpercent=percent(utilization)) %>%
+ggplot(aes(x=Week,y=utilization,fill=SCAC)) +
+    geom_bar(stat="identity",position = "dodge") +
+	scale_y_continuous(labels=percent,breaks = c(0,0.2,0.4,0.6,0.8,1.0,1.2)) +
+  coord_cartesian(ylim = c(0, 1.25)) +
+	    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold")) +
+    labs(x="Week",y="Utilization %",title="Overall Utilization")
+
+ggplotly(utilover)
+```
+
+Carrier OTP w/ Carrier Controlled and Not CC
+
+```{r CCOTP, echo=FALSE}
+ccotp <- ggplot(lateloads,aes(x=Week)) +
+    geom_bar(aes(y=count,fill=Carrier.Control), stat="identity",color="white", width = 1) +
+    labs(title="Late Loads w/ Carrier Controlled",x="Week",y="Late Load Count")
+
+ggplotly(ccotp)
+```
+
+## Geneva Charting
+
+Geneva Total Loads Shipped by Weekday
+
+```{r Genrelease, echo=FALSE,message=FALSE,warning=FALSE}
+#Geneva Loads Picked up Per Day
+release <- x %>%
+    distinct(Load.ID,.keep_all = TRUE) %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,Weekday,Complete.Op.Responsible.ID) %>%
+	summarize( count = n() )
+
+release$Weekday <- factor(release$Weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+releaseplot <- release %>%
+filter(Complete.Op.Responsible.ID=="GUARDIAN-GEN") %>%
+ggplot(aes(x=Weekday,y=count)) + 
+    geom_bar(aes(fill = Weekday,alpha = factor(Week)), stat = "identity") + 
+    scale_alpha_manual(values = c(0.7,1,0.7,1, 0.7),guide = "none",expand = c(0.1,0.1)) +
+    facet_wrap(~Week,nrow=1) +
+    theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        legend.position = "none",
+                        axis.title.x=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.ticks.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+						strip.text=element_text(vjust=-10))+
+    labs(x="Weekdays",y="") +
+    ylim(0,100)
+
+ggplotly(releaseplot)
+```
+
+Geneva CPT over the past 5 Weeks
+
+```{r Gencpt, echo=FALSE,message=FALSE,warning=FALSE}
+#Script to run ggplot for CPT	
+cptover <- x %>%
+    distinct(Load.ID,SCAC,Complete.Op.Responsible.ID,Week,Month,Weekday,Load.Weight.Tons,Load.Total.Cost,CPT)  %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-GEN") %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,SCAC) %>%
+	summarize(CPT=mean(CPT)) 
+	
+stat_sum_single <- function(fun, geom="point", ...) {
+  stat_summary(fun.y=fun, color="red", geom=geom, size = 1, ...)
+}
+
+cptoverplot <- ggplot(data=cptover,aes(Week, CPT, color=SCAC)) +
+    geom_jitter() +
+	ylim(0,500) +
+    coord_cartesian(ylim = c(0, 500)) +
+    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+                        axis.title.y=element_text(angle=180)) +
+	stat_sum_single(mean, geom="line")
+
+ggplotly(cptoverplot)
+```
+
+Geneva Utilization Overview
+
+```{r Genutilization, echo=FALSE}
+#overall utilization or multiple plants achieved by (totalrequiredmiles=mean(Required.Miles)) also change Required.Miles to numbers in spreasheet
+utilover <- metricsutil %>%
+    distinct(Load.ID,.keep_all = TRUE)  %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-GEN") %>%
+    group_by(SCAC,Week) %>%
+	summarise(totalmiles= sum(Miles),totalrequiredmiles=mean(Required.Miles)) %>%
+	mutate(utilization=totalmiles/totalrequiredmiles) %>%
+    mutate(utilpercent=percent(utilization)) %>%
+ggplot(aes(x=Week,y=utilization,fill=SCAC)) +
+    geom_bar(stat="identity",position = position_dodge(width = 100),color="white") +
+	scale_y_continuous(labels=percent,breaks = c(0,0.2,0.4,0.6,0.8,1.0,1.2)) +
+  coord_cartesian(ylim = c(0, 1.25)) +
+	    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        legend.position = "none",
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold")) +
+    labs(x="Week",y="Utilization %",title="Maverick Utilization")
+
+ggplotly(utilover)
+```
+
+## Richburg Charting
+
+Richurg Total Loads Shipped by Weekday
+
+```{r Richrelease, echo=FALSE,message=FALSE,warning=FALSE}
+#Richburg Loads Picked up Per Day
+release <- x %>%
+    distinct(Load.ID,.keep_all = TRUE) %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,Weekday,Complete.Op.Responsible.ID) %>%
+	summarize( count = n() )
+
+release$Weekday <- factor(release$Weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+releaseplot <- release %>%
+filter(Complete.Op.Responsible.ID=="GUARDIAN-RICH") %>%
+ggplot(aes(x=Weekday,y=count)) + 
+    geom_bar(aes(fill = Weekday,alpha = factor(Week)), stat = "identity") + 
+    scale_alpha_manual(values = c(0.7,1,0.7,1, 0.7),guide = "none",expand = c(0.1,0.1)) +
+    facet_wrap(~Week,nrow=1) +
+    theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        legend.position = "none",
+                        axis.title.x=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.ticks.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+						strip.text=element_text(vjust=-10))+
+    labs(x="Weekdays",y="") +
+    ylim(0,100)
+
+ggplotly(releaseplot)
+```
+
+Richburg CPT over the past 5 Weeks
+
+```{r Richcpt, echo=FALSE,message=FALSE,warning=FALSE}
+#Script to run ggplot for CPT	
+cptover <- x %>%
+    distinct(Load.ID,SCAC,Complete.Op.Responsible.ID,Week,Month,Weekday,Load.Weight.Tons,Load.Total.Cost,CPT)  %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-RICH") %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,SCAC) %>%
+	summarize(CPT=mean(CPT)) 
+	
+stat_sum_single <- function(fun, geom="point", ...) {
+  stat_summary(fun.y=fun, color="red", geom=geom, size = 1, ...)
+}
+
+cptoverplot <- ggplot(data=cptover,aes(Week, CPT, color=SCAC)) +
+    geom_jitter() +
+	ylim(0,500) +
+    coord_cartesian(ylim = c(0, 500)) +
+    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+                        axis.title.y=element_text(angle=180)) +
+	stat_sum_single(mean, geom="line")
+
+ggplotly(cptoverplot)
+```
+
+Richburg Utilization Overview
+
+```{r Richutilization, echo=FALSE}
+#overall utilization or multiple plants achieved by (totalrequiredmiles=mean(Required.Miles)) also change Required.Miles to numbers in spreasheet
+utilover <- metricsutil %>%
+    distinct(Load.ID,.keep_all = TRUE)  %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    filter(Complete.Op.Responsible.ID=="GUARDIAN-RICH") %>%
+    group_by(SCAC,Week) %>%
+	summarise(totalmiles= sum(Miles),totalrequiredmiles=mean(Required.Miles)) %>%
+	mutate(utilization=totalmiles/totalrequiredmiles) %>%
+    mutate(utilpercent=percent(utilization)) %>%
+ggplot(aes(x=Week,y=utilization,fill=SCAC)) +
+    geom_bar(stat="identity",position = "dodge") +
+	scale_y_continuous(labels=percent,breaks = c(0,0.2,0.4,0.6,0.8,1.0,1.2)) +
+  coord_cartesian(ylim = c(0, 1.25)) +
+	    theme_bw() + theme( panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_blank(),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        title=element_text(size=14,face="bold")) +
+    labs(x="Week",y="Utilization %",title="Overall Utilization")
+
+ggplotly(utilover)
+```
+
+## Dewitt Charting
+
+```{r Dewrelease, echo=FALSE,message=FALSE,warning=FALSE}
+#Dewitt Loads Picked up Per Day
+release <- x %>%
+    distinct(Load.ID,.keep_all = TRUE) %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,Weekday,Complete.Op.Responsible.ID) %>%
+	summarize( count = n() )
+
+release$Weekday <- factor(release$Weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+releaseplot <- release %>%
+filter(Complete.Op.Responsible.ID=="GUARDIAN-DEW") %>%
+ggplot(aes(x=Weekday,y=count)) + 
+    geom_bar(aes(fill = Weekday,alpha = factor(Week)), stat = "identity") + 
+    scale_alpha_manual(values = c(0.7,1,0.7,1, 0.7),guide = "none",expand = c(0.1,0.1)) +
+    facet_wrap(~Week,nrow=1) +
+    theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        legend.position = "none",
+                        axis.title.x=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.ticks.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+						strip.text=element_text(vjust=-10))+
+    labs(x="Weekdays",y="Load Count") +
+    ylim(0,100)
+
+ggplotly(releaseplot)
+```
+
+## Kingsburg Charting
+
+Kingsburg Total Loads Shipped by Weekday
+
+```{r Kingrelease, echo=FALSE,message=FALSE,warning=FALSE}
+#Kingsburg Loads Picked up Per Day
+release <- x %>%
+    distinct(Load.ID,.keep_all = TRUE) %>%
+    filter(Week <= Startweekvalue & Week >= Endweekvalue) %>%
+    group_by(Week,Weekday,Complete.Op.Responsible.ID) %>%
+	summarize( count = n() )
+
+release$Weekday <- factor(release$Weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+releaseplot <- release %>%
+filter(Complete.Op.Responsible.ID=="GUARDIAN-KING") %>%
+ggplot(aes(x=Weekday,y=count)) + 
+    geom_bar(aes(fill = Weekday,alpha = factor(Week)), stat = "identity") + 
+    scale_alpha_manual(values = c(0.7,1,0.7,1, 0.7),guide = "none",expand = c(0.1,0.1)) +
+    facet_wrap(~Week,nrow=1) +
+    theme_bw() + theme( strip.background  = element_blank(),
+                        panel.grid.major = element_line(colour = "grey80"),
+                        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+                        axis.ticks = element_blank(),
+                        panel.grid.minor.x=element_blank(),
+                        panel.grid.major.x=element_blank(),
+                        legend.position = "none",
+                        axis.title.x=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.ticks.x=element_blank(),
+                        title=element_text(size=14,face="bold"),
+						strip.text=element_text(vjust=-10))+
+    labs(x="Weekdays",y="") +
+    ylim(0,100)
+
+ggplotly(releaseplot)
+```
